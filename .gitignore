@@ -8,6 +8,7 @@ venv/
 *.egg-info/
 *.vscode
 *.swp
+license/mosek.lic
 
 *.code-workspace
 solve_mosek.ptf

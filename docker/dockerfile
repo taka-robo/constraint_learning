@@ -1,0 +1,62 @@
+# docker/dockerfile
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+  TZ=Etc/UTC \
+  LANG=C.UTF-8 \
+  LC_ALL=C.UTF-8
+
+# 基本ツール + LaTeX (プロット用)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  bash tini git curl ca-certificates \
+  build-essential cmake pkg-config \
+  libglib2.0-0 libgl1 \
+  texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended latexmk \
+  cm-super fonts-lmodern texlive-fonts-extra \
+  && rm -rf /var/lib/apt/lists/*
+
+# ---- conda (Miniforge, conda-forge 優先) ----
+ENV CONDA_DIR=/opt/conda
+RUN curl -fsSL https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -o /tmp/miniforge.sh \
+  && bash /tmp/miniforge.sh -b -p $CONDA_DIR \
+  && rm -f /tmp/miniforge.sh
+ENV PATH="$CONDA_DIR/bin:$PATH"
+
+# conda 設定（conda-forge, mosek）
+RUN printf "%s\n" \
+  "channel_priority: strict" \
+  "channels:" \
+  "  - conda-forge" \
+  "  - mosek" \
+  "show_channel_urls: true" \
+  > /opt/conda/.condarc
+
+RUN conda update -n base -c conda-forge -y conda && conda clean -afy
+
+# ---- プロジェクト配置 ----
+SHELL ["/bin/bash", "-lc"]
+WORKDIR /workspace/constraint_learning
+COPY . /workspace/constraint_learning
+
+# ここがポイント：PYTHONPATH をプロジェクトルートに設定
+ENV PYTHONPATH="/workspace/constraint_learning/_scripts:/workspace/constraint_learning/poly_matrix:/workspace/constraint_learning"
+# ENV PYTHONPATH=/workspace/constraint_learning
+
+# _scripts をパッケージとして認識させる（無ければ作成）
+RUN [ -f _scripts/__init__.py ] || touch _scripts/__init__.py
+
+# 環境作成（environment.yml を利用、requirements.txt は中で参照）
+RUN conda env create -f environment.yml && conda clean -afy
+
+# 作成した環境を PATH に追加
+ARG ENV_NAME=constraint_learning
+ENV PATH="$CONDA_DIR/envs/${ENV_NAME}/bin:$PATH"
+
+# pip 系の更新（任意）
+RUN python -m pip install --upgrade pip setuptools wheel
+
+# MOSEK ライセンス（起動時に -v でファイルを渡す想定）
+ENV MOSEKLM_LICENSE_FILE=/licenses/mosek.lic
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/bin/bash"]
